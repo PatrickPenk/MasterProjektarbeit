@@ -1,0 +1,22 @@
+# Core Data Handling
+pandas>=2.0
+numpy>=1.24
+
+# Database / SQL
+duckdb>=0.9
+
+# File formats
+pyarrow>=12.0
+
+# Machine Learning
+scikit-learn>=1.3
+joblib>=1.3
+
+# Visualization
+matplotlib>=3.7
+
+# HTTP / Download
+requests>=2.31
+
+# Utilities
+python-dateutil>=2.8

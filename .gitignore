@@ -1,0 +1,17 @@
+# Data & Outputs
+data/
+out/
+archive/
+
+# DuckDB
+*.duckdb
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / Editor
+.DS_Store
+.vscode/
