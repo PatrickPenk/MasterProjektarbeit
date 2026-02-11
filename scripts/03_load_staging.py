@@ -1,3 +1,7 @@
+# ============================================================
+# 03_load_staging.py
+# ============================================================
+
 from __future__ import annotations
 
 import json
@@ -9,7 +13,7 @@ from typing import Dict, List
 
 import duckdb
 
-from scripts.config import DB_PATH, OUT_DIR, ensure_dirs, CORE_TABLES
+from scripts.config import DB_PATH, MANIFEST_DIR, ensure_dirs, CORE_TABLES
 
 ensure_dirs()
 
@@ -22,9 +26,10 @@ print("=" * 60)
 # ============================================================
 
 manifest_candidates = [
-    OUT_DIR / "manifest_raw_profiled.json",
-    OUT_DIR / "manifest_raw.json",
+    MANIFEST_DIR / "manifest_raw_profiled.json",
+    MANIFEST_DIR / "manifest_raw.json",
 ]
+
 
 manifest_in_path = next((p for p in manifest_candidates if p.exists()), None)
 if manifest_in_path is None:
@@ -191,7 +196,7 @@ manifest_out.update({
     }
 })
 
-manifest_out_path = OUT_DIR / "manifest_staging.json"
+manifest_out_path = MANIFEST_DIR / "manifest_staging.json"
 manifest_out_path.write_text(json.dumps(manifest_out, indent=2), encoding="utf-8")
 
 print("\n" + "-" * 60)

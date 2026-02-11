@@ -1,7 +1,5 @@
 # ============================================================
 # 06_sdtm_mapping.py
-# SDTM Mapping (Curated → SDTM Domains)
-# Covers: DM, SV, LB, VS, MH, CM, PR
 # ============================================================
 
 from __future__ import annotations
@@ -13,7 +11,7 @@ from typing import Dict
 
 import duckdb
 
-from scripts.config import DB_PATH, OUT_DIR, ensure_dirs
+from scripts.config import DB_PATH, MANIFEST_DIR, SDTM_DIR, ensure_dirs
 
 ensure_dirs()
 
@@ -26,12 +24,13 @@ print("=" * 60)
 # ============================================================
 
 manifest_candidates = [
-    OUT_DIR / "manifest_curated.json",
-    OUT_DIR / "manifest_staging_checked.json",
-    OUT_DIR / "manifest_staging.json",
-    OUT_DIR / "manifest_raw_profiled.json",
-    OUT_DIR / "manifest_raw.json",
+    MANIFEST_DIR / "manifest_curated.json",
+    MANIFEST_DIR / "manifest_staging_checked.json",
+    MANIFEST_DIR / "manifest_staging.json",
+    MANIFEST_DIR / "manifest_raw_profiled.json",
+    MANIFEST_DIR / "manifest_raw.json",
 ]
+
 manifest_in_path = next((p for p in manifest_candidates if p.exists()), None)
 if manifest_in_path is None:
     raise FileNotFoundError(
@@ -59,23 +58,20 @@ print(f"[db ] path                : {DB_PATH}")
 STUDYID = "SYNTH-01"
 LAYER = "sdtm"
 
-SDTM_DIR = OUT_DIR / "sdtm"
 SDTM_DIR.mkdir(parents=True, exist_ok=True)
 
-MANIFEST_OUT_PATH = OUT_DIR / "manifest_sdtm.json"
+MANIFEST_OUT_PATH = MANIFEST_DIR / "manifest_sdtm.json"
 
 # VS split config: explicit and auditable
-# You can extend this list as needed.
 VS_LOINC: Dict[str, str] = {
     "BP_DIA": "8462-4",   # Diastolic blood pressure
     "BP_SYS": "8480-6",   # Systolic blood pressure
     "HR":     "8867-4",   # Heart rate
     "TEMP":   "8310-5",   # Body temperature
-    # Common extensions (optional):
-    # "RR":   "9279-1",   # Respiratory rate
-    # "WT":   "29463-7",  # Body weight
-    # "HT":   "8302-2",   # Body height
-    # "BMI":  "39156-5",  # BMI
+     "RR":   "9279-1",   # Respiratory rate
+     "WT":   "29463-7",  # Body weight
+     "HT":   "8302-2",   # Body height
+     "BMI":  "39156-5",  # BMI
 }
 VS_LOINC_LIST_SQL = ",".join([f"'{v}'" for v in VS_LOINC.values()])
 

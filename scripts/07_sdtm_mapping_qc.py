@@ -1,20 +1,5 @@
 # ============================================================
 # 07_sdtm_mapping_qc.py
-# SDTM Mapping Quality – Coverage, Unmapped, Timing Plausibility
-# + EXTRA QC (1–2 zusätzliche Checks, allgemein)
-# + HTML Report + PNG Charts
-#
-# Baseline Checks (wie Schritt 16):
-#  - Coverage: Code/Label vorhanden?
-#  - Top Unmapped: fehlender Code/Label bzw. UNKNOWN/UNK/leer (LB/VS)
-#  - Plausibilität: Stop>=Start + Missing Stop Raten (SV, MH, CM, PR)
-#
-# Zusätzliche, allgemeine QC Checks (prüfungsfest):
-#  A) SDTM Referential Integrity: alle Domains.USUBJID müssen in DM existieren
-#  B) Duplicate Key Heuristics: (USUBJID, DTC, TESTCD/TRT/TERM) Duplikat-Gruppen zählen
-#
-# Input : manifest_sdtm.json (Step 06)
-# Output: CSVs + summary JSON + HTML Report + PNG Grafiken + manifest_sdtm_checked.json
 # ============================================================
 
 from __future__ import annotations
@@ -31,7 +16,7 @@ import duckdb
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from scripts.config import DB_PATH, OUT_DIR, ensure_dirs
+from scripts.config import DB_PATH, MANIFEST_DIR, SDTM_QC_DIR, ensure_dirs
 
 ensure_dirs()
 
@@ -43,7 +28,8 @@ print("=" * 70)
 # 1) Manifest laden (Input aus Step 06)
 # ============================================================
 
-manifest_in_path = OUT_DIR / "manifest_sdtm.json"
+manifest_in_path = MANIFEST_DIR / "manifest_sdtm.json"
+
 if not manifest_in_path.exists():
     raise FileNotFoundError(
         f"Manifest nicht gefunden: {manifest_in_path}\n"
@@ -65,7 +51,7 @@ print(f"[db ] path                : {DB_PATH}")
 # 2) Outputs
 # ============================================================
 
-QC_DIR = OUT_DIR / "sdtm_qc"
+QC_DIR = SDTM_QC_DIR
 QC_DIR.mkdir(parents=True, exist_ok=True)
 
 COVERAGE_CSV = QC_DIR / "sdtm_mapping_coverage.csv"
@@ -84,7 +70,7 @@ CHART_TIMING_BAD_PNG = QC_DIR / "chart_timing_bad_end_lt_start.png"
 CHART_TIMING_MISSING_END_PNG = QC_DIR / "chart_timing_missing_end_pct.png"
 CHART_RI_MISSING_PNG = QC_DIR / "chart_ri_missing_usubjid.png"
 
-MANIFEST_OUT_PATH = OUT_DIR / "manifest_sdtm_checked.json"
+MANIFEST_OUT_PATH = MANIFEST_DIR / "manifest_sdtm_checked.json"
 
 # Gate behavior (optional)
 STRICT_QC = False  # set True if you want to fail pipeline on hard_failures
@@ -122,11 +108,10 @@ def html_table(headers: List[str], rows: List[Tuple]) -> str:
     )
 
 # ============================================================
-# 4) QC Definitions (prüfungsnah)
+# 4) QC Definitions 
 # ============================================================
 
 # Coverage: domain -> (table, code_col, label_col)
-# NOTE: Step 06 erzeugt MH nur mit MHTERM und PR nur mit PRTRT (keine *DECOD Spalten).
 COVERAGE_SPECS: List[Tuple[str, str, Optional[str], Optional[str]]] = [
     ("DM", "sdtm_dm", None, None),
     ("SV", "sdtm_sv", None, "VISIT"),
@@ -162,7 +147,6 @@ RI_TABLES: List[Tuple[str, str]] = [
 ]
 
 # Extra QC B: Duplicate group heuristics (domain -> table, key expr)
-# 목적: “Mapping produziert keine massiven Duplikate”
 DUP_SPECS: List[Tuple[str, str, str]] = [
     ("SV", "sdtm_sv", "USUBJID, SVSTDTC, COALESCE(VISIT,'')"),
     ("LB", "sdtm_lb", "USUBJID, LBDTC, COALESCE(LBTESTCD,''), COALESCE(LBORRES,'')"),
@@ -395,7 +379,7 @@ finally:
     con.close()
 
 # ============================================================
-# 6) Summary JSON (prüfungsfreundlich)
+# 6) Summary JSON 
 # ============================================================
 
 worst_code = (
@@ -441,10 +425,6 @@ SUMMARY_JSON.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
 # ============================================================
 # 7) Grafik Outputs (PNG)
-#   - Coverage: Code/Label only where applicable + n/a labels
-#   - Timing bad counts: make zeros visible + annotate
-#   - Timing missing end %: annotate
-#   - RI missing: missing_usubjid + fk_missing stacked (counts)
 # ============================================================
 
 # --- Coverage chart ---

@@ -1,3 +1,7 @@
+# ============================================================
+# 02_raw_profiling.py
+# ============================================================
+
 from __future__ import annotations
 
 import json
@@ -7,7 +11,7 @@ from typing import Tuple, Dict, List
 import numpy as np
 import pandas as pd
 
-from scripts.config import OUT_DIR, ensure_dirs, CORE_TABLES
+from scripts.config import RAW_PROF_DIR, MANIFEST_DIR, ensure_dirs, CORE_TABLES
 ensure_dirs()
 
 # ============================================================
@@ -19,7 +23,7 @@ print("=" * 60)
 # 1. Manifest laden (Input aus Step 01)
 # ============================================================
 
-manifest_in_path = OUT_DIR / "manifest_raw.json"
+manifest_in_path = MANIFEST_DIR / "manifest_raw.json"
 if not manifest_in_path.exists():
     raise FileNotFoundError(
         f"Manifest nicht gefunden: {manifest_in_path}\n"
@@ -121,8 +125,8 @@ profiles_df = pd.DataFrame(profiles).sort_values("table")
 date_detail_df = pd.DataFrame(date_quality_details).sort_values("invalid_parse_rate", ascending=False)
 
 # Outputs
-profiling_summary_path = OUT_DIR / "raw_profiling_summary.csv"
-date_quality_path = OUT_DIR / "raw_datefield_parse_quality.csv"
+profiling_summary_path = RAW_PROF_DIR / "raw_profiling_summary.csv"
+date_quality_path      = RAW_PROF_DIR / "raw_datefield_parse_quality.csv"
 
 profiles_df.to_csv(profiling_summary_path, index=False)
 date_detail_df.to_csv(date_quality_path, index=False)
@@ -160,7 +164,7 @@ manifest_out.update({
     }
 })
 
-manifest_out_path = OUT_DIR / "manifest_raw_profiled.json"
+manifest_out_path = MANIFEST_DIR / "manifest_raw_profiled.json"
 manifest_out_path.write_text(json.dumps(manifest_out, indent=2), encoding="utf-8")
 
 print(f"[out] manifest            : {manifest_out_path}")

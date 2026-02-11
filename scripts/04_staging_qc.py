@@ -1,3 +1,7 @@
+# ============================================================
+# 04_staging_qc.py
+# ============================================================
+
 from __future__ import annotations
 
 import json
@@ -9,7 +13,7 @@ import duckdb
 import pandas as pd
 from html import escape
 
-from scripts.config import DB_PATH, OUT_DIR, ensure_dirs, CORE_TABLES
+from scripts.config import DB_PATH, MANIFEST_DIR, STAGING_QC_DIR, ensure_dirs, CORE_TABLES
 
 ensure_dirs()
 
@@ -22,10 +26,11 @@ print("=" * 70)
 # ============================================================
 
 manifest_candidates = [
-    OUT_DIR / "manifest_staging.json",
-    OUT_DIR / "manifest_raw_profiled.json",
-    OUT_DIR / "manifest_raw.json",
+    MANIFEST_DIR / "manifest_staging.json",
+    MANIFEST_DIR / "manifest_raw_profiled.json",
+    MANIFEST_DIR / "manifest_raw.json",
 ]
+
 manifest_in_path = next((p for p in manifest_candidates if p.exists()), None)
 if manifest_in_path is None:
     raise FileNotFoundError(
@@ -52,9 +57,9 @@ print(f"[db ] path                : {DB_PATH}")
 LAYER = "staging"
 CHECKED_AT = datetime.now(timezone.utc)
 
-# Gate-Strategie:
-# - STRICT_DQ: stoppt nur bei HARD fails
-# - Additional checks (RI/Plaus/Dups) sind standardmäßig SOFT.
+
+# STRICT_DQ: stoppt nur bei HARD fails
+# Additional checks (RI/Plaus/Dups) sind standardmäßig SOFT.
 STRICT_DQ = True
 
 TECH_REQUIRED_COLS = ["_run_id", "_ingested_at", "_source_file"]
@@ -79,6 +84,7 @@ def ensure_meta_tables(con: duckdb.DuckDBPyConnection) -> None:
     );
     """)
 
+#duckdb
 def table_exists(con: duckdb.DuckDBPyConnection, table: str) -> bool:
     return con.execute(
         "SELECT 1 FROM duckdb_tables() WHERE table_name = ? LIMIT 1",
@@ -153,9 +159,7 @@ def log_fail(con, check_name, table_name, severity, n_bad, message):
               severity=severity, n_bad=n_bad, status="FAIL", message=message)
 
 # ============================================================
-# 3) Welche Tabellen prüfen?
-#    - Core aus config
-#    - + optional: alle stg_* Tabellen, die geladen wurden (empfohlen)
+# 3) Welche Tabellen prüfen
 # ============================================================
 
 con = open_duckdb(DB_PATH)
@@ -166,7 +170,7 @@ try:
     core_stg_tables = [f"stg_{t}" for t in CORE_TABLES]
     loaded_stg_tables = list_stg_tables(con)
 
-    # Wenn du wirklich "alles, was geladen wurde" prüfen willst:
+    # alles testen 
     stg_tables_to_check = sorted(set(core_stg_tables) | set(loaded_stg_tables))
 
     print(f"[plan] core_stg_tables       : {', '.join(core_stg_tables)}")
@@ -216,9 +220,6 @@ try:
 
     # ============================================================
     # 4B) Gate 1 - Key checks for main identity tables (HARD)
-    #     Unterstützt zwei Namenswelten:
-    #     - Synthea: stg_patients(Id), stg_encounters(Id, Patient)
-    #     - Dein SQLite-Konzept: stg_person(source_patient_id), stg_visit(source_encounter_id, source_patient_id)
     # ============================================================
 
     def check_pk_not_null_unique(table: str, pk_candidates: Tuple[str, ...], label: str):
@@ -328,8 +329,7 @@ try:
         if severity == "HARD" and n_bad > 0:
             hard_failures.append(f"{child_table}: RI fail {check_name} n_bad={n_bad}")
 
-    # --- RI: "Visit -> Person" (oder encounters->patients) ---
-    # SQLite-Schema
+    # --- RI: "Visit -> Person" (oder encounters->patients)
     ri_check(
         "stg_visit", "stg_person",
         child_fk_candidates=("source_patient_id", "patient_id", "Patient"),
@@ -497,7 +497,7 @@ manifest_out.update({
     }
 })
 
-manifest_out_path = OUT_DIR / "manifest_staging_checked.json"
+manifest_out_path = MANIFEST_DIR / "manifest_staging_checked.json"
 manifest_out_path.write_text(json.dumps(manifest_out, indent=2), encoding="utf-8")
 
 print("\n" + "-" * 70)
@@ -518,7 +518,7 @@ print("=" * 70 + "\n")
 # 6) HTML Report exportieren
 # ============================================================
 
-dq_html_path = OUT_DIR / "staging_dq_report.html"
+dq_html_path = STAGING_QC_DIR / "staging_dq_report.html"
 con_ro = duckdb.connect(str(DB_PATH), read_only=True)
 
 dq_df = con_ro.execute("""

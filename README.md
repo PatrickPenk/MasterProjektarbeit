@@ -1,175 +1,124 @@
 # End-to-End Clinical Data Pipeline (CDISC-orientiert)
 
 ## Überblick
-Dieses Projekt implementiert eine **reproduzierbare, qualitätsgesicherte End-to-End-Datenpipeline**
-für klinische Forschungsdaten. Der Fokus liegt auf klaren Datenlayern, expliziten
-Data-Quality-Gates, CDISC-Konformität (SDTM / ADaM) sowie Governance-, Audit- und
-Archivierungsaspekten.
 
-Die Pipeline verarbeitet synthetische klinische Daten (Synthea) von **Rohdaten**
-bis hin zu **Analyse, Machine Learning und revisionssicherer Archivierung**.
+Dieses Projekt implementiert eine **reproduzierbare, qualitätsgesicherte
+End-to-End-Datenpipeline** für klinische Forschungsdaten auf Basis
+synthetischer Synthea-Daten.
 
----
+Die Pipeline deckt den vollständigen Datenlebenszyklus ab:
 
-## Zielsetzung
-- Aufbau einer strukturierten Datenpipeline  
-  *(Raw → Staging → Curated → SDTM → ADaM → Marts)*
-- Sicherstellung von Datenqualität durch explizite QC-Gates
-- CDISC-konforme Aufbereitung für regulatorische und analytische Nutzung
-- Reproduzierbarkeit durch Manifeste, deterministische Schritte und Versionierung
-- Nachvollziehbarkeit durch Dokumentation und Reports
-- Demonstration einer vollständigen Data-Science- / ML-Kette
+Raw → Profiling → Staging → DQ-Gates → Curated → SDTM → SDTM QC → ADaM →
+ADaM QC → Marts → ML → Final Report → Archivierung
 
----
+Der Fokus liegt auf: - klar definierten Datenlayern - expliziten Quality
+Gates - CDISC-orientierter Strukturierung (SDTM / ADaM) -
+Reproduzierbarkeit durch Manifeste - Auditierbarkeit durch QC-Reports -
+Governance & Archivierung (OAIS-orientiert)
 
-## Architektur (High-Level)
-```
-Raw Data (ZIP / CSV)
-↓
-Raw Profiling
-↓
-Staging (DuckDB)
-↓
-Staging QC (DQ Gates)
-↓
-Curated Layer (+ Rejects)
-↓
-SDTM Domains
-↓
-SDTM QC
-↓
-ADaM Datasets
-↓
-ADaM QC
-↓
-Analytical Marts
-↓
-ML Training & Evaluation
-↓
-Final Report
-↓
-Archivierung (OAIS / FAIR)
-```
+------------------------------------------------------------------------
 
----
+# 🚀 Pipeline starten (empfohlener Ablauf)
 
-## Projektstruktur
-```
-project_root/
-│
-├─ data/
-│ ├─ raw/ # Original ZIP-Dateien (unverändert)
-│ ├─ extracted/ # Entpackte CSVs
-│ └─ duckdb/ # DuckDB Warehouse (warehouse.duckdb)
-│
-├─ scripts/ # Pipeline-Skripte (01–13, nummeriert)
-│
-├─ documentation/ # Fachliche Dokumentation je Pipeline-Schritt (Markdown)
-│
-├─ out/ # Alle generierten Outputs und Artefakte
-│ ├─ curated/
-│ ├─ sdtm/
-│ ├─ sdtm_qc/
-│ ├─ adam/
-│ ├─ adam_qc/
-│ ├─ marts/
-│ ├─ ml/
-│ ├─ final/
-│ └─ archive/
-│
-├─ README.md # Diese Datei
-└─ requirements.txt
+## 1) Voraussetzungen
 
-```
+-   Python ≥ 3.10
+-   Kein Docker erforderlich
+-   Keine Conda-/Poetry-Installation notwendig
 
----
+------------------------------------------------------------------------
 
-## Pipeline-Steps (Kurzüberblick)
+## 2) Virtuelle Umgebung anlegen (dringend empfohlen)
 
-| Step | Skript | Inhalt |
-|-----:|--------|--------|
-| 01 | download_extract | Download & sichere Entpackung der Rohdaten |
-| 02 | raw_profiling | Deskriptives Profiling der Rohdaten |
-| 03 | load_staging | Laden in DuckDB (Staging) |
-| 04 | staging_qc | Technische & fachliche Qualitätschecks |
-| 05 | curated_transform | Fachlich bereinigter Curated Layer |
-| 06 | sdtm_mapping | Ableitung der SDTM-Domains |
-| 07 | sdtm_mapping_qc | Qualitätsprüfung der SDTM-Daten |
-| 08 | adam_mapping | Erstellung analysereifer ADaM-Datasets |
-| 09 | adam_qc | Qualitätsprüfung der ADaM-Datasets |
-| 10 | marts | Feature-Marts für Analyse & ML |
-| 11 | ml_train | Modelltraining & Evaluation |
-| 12 | final_report | Zusammenfassender Ergebnisbericht |
-| 13 | archive | Archivierung & Anonymisierung (OAIS-orientiert) |
+Windows:
 
-Detaillierte Beschreibungen befinden sich im Ordner **`documentation/`**.
+    python -m venv .venv
+    .venv\Scripts\activate
 
----
+macOS / Linux:
 
-## Technischer Stack
-- **Programmiersprache:** Python  
-- **Datenbank:** DuckDB (lokal, serverlos)  
-- **Datenformate:** CSV, Parquet, JSON  
-- **Visualisierung:** Matplotlib  
-- **Machine Learning:** scikit-learn  
-- **Governance:** Manifeste, QC-Reports, Checksums  
-- **Archivierung:** OAIS-Prinzipien, Fixity (SHA256), Inventare  
+    python3 -m venv .venv
+    source .venv/bin/activate
 
----
+------------------------------------------------------------------------
 
-## Pipeline ausführen (One-Click)
+## 3) Abhängigkeiten installieren
 
-```bash
-python run_pipeline.py
-```
+Alle benötigten Bibliotheken sind in `requirements.txt` definiert:
 
----
+    pip install --upgrade pip
+    pip install -r requirements.txt
 
-## Ausführung der Pipeline
+Ohne diesen Schritt kann die Pipeline nicht ausgeführt werden.
 
-### Voraussetzungen
-- Python ≥ 3.10
+------------------------------------------------------------------------
 
-Empfohlene Installation:
-```bash
-pip install -r requirements.txt
-```
+## 4) Pipeline ausführen
 
----
+Gesamte Pipeline (Steps 01--13):
 
-## Data Governance & Qualität
-- Jeder Pipeline-Schritt erzeugt ein **Manifest**
-- QC-Ergebnisse werden als **CSV- und HTML-Reports** persistiert
-- Rejects werden nicht gelöscht, sondern explizit dokumentiert
-- Keine impliziten Transformationen oder „stille“ Imputationen
-- Klare Trennung von:
-  - technischer Qualität (Schema, Schlüssel, Run-IDs)
-  - fachlicher Qualität (Plausibilität, zeitliche Logik)
+    python -m scripts.00_run_pipeline
 
----
+Optional: Ab einem bestimmten Schritt starten (z.B. Step 6):
 
-## Archivierung & FAIR
-Der letzte Pipeline-Schritt erzeugt ein revisionssicheres Archivpaket:
-- anonymisierte Exporte
-- Checksums (Fixity)
-- Inventarliste
-- strukturierte Metadaten (JSON)
-- optionale ZIP-Auslieferung
+    python -m scripts.00_run_pipeline --from 6
 
-Orientiert an:
-- **OAIS (ISO 14721)**
-- **FAIR-Prinzipien** (Findable, Accessible, Interoperable, Reusable)
+------------------------------------------------------------------------
 
----
+# Architektur (Tatsächliche Reihenfolge laut Code)
 
-## Kontext & Nutzung
-Dieses Projekt wurde im Rahmen einer **Projektarbeit im Umfeld von Datenmanagement,
-Data Engineering und Data Governance** erstellt.  
-Es dient der Demonstration bewährter Konzepte entlang des gesamten
-Datenlebenszyklus klinischer Forschungsdaten.
+01 Download & Extract\
+02 Raw Profiling\
+03 Load Staging (DuckDB)\
+04 Staging QC (DQ-Gates)\
+05 Curated Transform (+ Reject Layer)\
+06 SDTM Mapping\
+07 SDTM QC\
+08 ADaM Mapping (ADSL + ADBDS_LOS)\
+09 ADaM QC\
+10 Marts Build (mart_merged_for_lm)\
+11 ML Training & Evaluation\
+12 Final Summary Report\
+13 Archive Package
 
----
+------------------------------------------------------------------------
 
-## Hinweis
-Die verwendeten Daten (Synthea) sind **synthetisch** und enthalten
-**keine realen Patientendaten**.
+# Projektstruktur
+
+data/ raw/ Rohdaten (ZIP) extracted/ Entpackte CSV-Dateien duckdb/
+warehouse.duckdb
+
+scripts/ 00_run_pipeline.py 01--13 Pipeline Steps
+
+out/ manifests/ raw_profiling/ staging_qc/ curated/ sdtm/ sdtm_qc/ adam/
+adam_qc/ marts/ ml/ final/
+
+archive/ Archivpaket (AIP/DIP, Fixity)
+
+------------------------------------------------------------------------
+
+# Data Governance & Qualität
+
+-   Jeder Schritt erzeugt ein Manifest (JSON)
+-   QC-Reports werden als CSV und HTML gespeichert
+-   Reject-Datensätze werden nicht gelöscht
+-   Keine stillen Transformationen
+-   Klare Layer-Trennung (stg\_, cur\_, sdtm\_, adam\_, mart\_)
+
+------------------------------------------------------------------------
+
+# Archivierung (Step 13)
+
+-   SIP → AIP → DIP Struktur
+-   SHA256 Fixity
+-   Pseudonymisierung (USUBJID → SUBJ_HASH)
+-   strukturierte Inventarliste
+
+Orientierung an OAIS- und FAIR-Prinzipien.
+
+------------------------------------------------------------------------
+
+# Hinweis
+
+Die verwendeten Daten (Synthea) sind synthetisch und enthalten keine
+realen Patientendaten.

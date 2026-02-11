@@ -1,3 +1,7 @@
+# ============================================================
+# 01_download_extract.py
+# ============================================================
+
 from pathlib import Path
 from typing import Dict
 import time
@@ -6,7 +10,7 @@ import hashlib
 import requests
 import json
 
-from scripts.config import RAW_DIR, EXTRACT_DIR, OUT_DIR, ensure_dirs
+from scripts.config import RAW_DIR, EXTRACT_DIR, MANIFEST_DIR, ensure_dirs
 ensure_dirs()
 
 # ============================================================
@@ -115,7 +119,7 @@ zip_path = download_file(SYNTHEA_ZIP_URL, zip_path)
 
 # Integrität überprüfen
 zip_sha = sha256_file(zip_path)
-(OUT_DIR / "zip_sha256.txt").write_text(zip_sha + "\n", encoding="utf-8")
+(MANIFEST_DIR / "zip_sha256.txt").write_text(zip_sha + "\n", encoding="utf-8")
 
 # Entpacken
 extracted_dir = safe_unzip(zip_path, EXTRACT_DIR / "synthea_csv")
@@ -156,8 +160,9 @@ manifest = {
     "zip_sha256": zip_sha,
 }
 
-manifest_path = OUT_DIR / "manifest_raw.json"
+manifest_path = MANIFEST_DIR / "manifest_raw.json"
 manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+print("[fixity] zip_sha256 file:", MANIFEST_DIR / "zip_sha256.txt")
 
 print("[manifest] wrote:", manifest_path)
 print("=" * 60 + "\n")

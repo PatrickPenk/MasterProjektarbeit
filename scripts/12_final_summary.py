@@ -1,25 +1,7 @@
 # ============================================================
 # 12_final_report.py
-# FINAL REPORT (verständliche Sprache, ohne Code-Begriffe)
-#
-# Zweck:
-#  - prüft anhand vorhandener Manifeste, welche Phasen erfolgreich liefen
-#  - fasst die wichtigsten Ergebnisse pro Phase zusammen
-#  - erzeugt einen leicht verständlichen Abschlussbericht als HTML + JSON
-#  - bindet vorhandene Grafiken aus Step 09 (ADaM QC) und Step 11 (ML) ein
-#  - ergänzt Marts-Kennzahlen robust direkt aus DuckDB (mart_merged_for_lm)
-#
-# Inputs (wenn vorhanden):
-#  - outputs/manifest_raw.json
-#  - outputs/manifest_staging_checked.json
-#  - outputs/manifest_sdtm_checked.json
-#  - outputs/manifest_adam_checked.json
-#  - outputs/manifest_marts.json
-#  - outputs/manifest_ml.json
-#
-# Outputs:
-#  - outputs/final/final_summary.json
-#  - outputs/final/final_report.html
+# FINAL REPORT (JSON + HTML) in OUT_DIR/final/
+# Reads manifests from MANIFEST_DIR (out/manifests/)
 # ============================================================
 
 from __future__ import annotations
@@ -30,16 +12,17 @@ from html import escape
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from scripts.config import OUT_DIR, DB_PATH, ensure_dirs
+from scripts.config import MANIFEST_DIR, OUT_DIR, DB_PATH, ensure_dirs
 
 ensure_dirs()
 
 print("\n" + "=" * 70)
-print("STEP 12 – FINAL REPORT (verständlich, mit Ergebnissen & Grafiken)")
+print("STEP 12 – FINAL REPORT")
 print("=" * 70)
 
 RUN_TS = datetime.now(timezone.utc)
 
+# ✅ Final outputs gehören nach OUT_DIR/final
 FINAL_DIR = OUT_DIR / "final"
 FINAL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -47,16 +30,16 @@ FINAL_JSON = FINAL_DIR / "final_summary.json"
 FINAL_HTML = FINAL_DIR / "final_report.html"
 
 # ------------------------------------------------------------
-# 1) Manifeste einsammeln
+# 1) Manifeste einsammeln (aus MANIFEST_DIR)
 # ------------------------------------------------------------
 
 MANIFEST_PATHS = {
-    "Rohdaten": OUT_DIR / "manifest_raw.json",
-    "Staging-Qualitätsprüfung": OUT_DIR / "manifest_staging_checked.json",
-    "SDTM-Erstellung & Prüfung": OUT_DIR / "manifest_sdtm_checked.json",
-    "ADaM-Erstellung & Prüfung": OUT_DIR / "manifest_adam_checked.json",
-    "Analyse-Datensatz (Marts)": OUT_DIR / "manifest_marts.json",
-    "Modelltraining (ML)": OUT_DIR / "manifest_ml.json",
+    "Rohdaten": MANIFEST_DIR / "manifest_raw.json",
+    "Staging-Qualitätsprüfung": MANIFEST_DIR / "manifest_staging_checked.json",
+    "SDTM-Erstellung & Prüfung": MANIFEST_DIR / "manifest_sdtm_checked.json",
+    "ADaM-Erstellung & Prüfung": MANIFEST_DIR / "manifest_adam_checked.json",
+    "Analyse-Datensatz (Marts)": MANIFEST_DIR / "manifest_marts.json",
+    "Modelltraining (ML)": MANIFEST_DIR / "manifest_ml.json",
 }
 
 
@@ -81,6 +64,25 @@ for phase, path in MANIFEST_PATHS.items():
         missing.append(phase)
 
 
+def deep_find_run_id(obj: Any) -> Optional[str]:
+    """Findet run_id robust auch in verschachtelten Strukturen."""
+    if isinstance(obj, dict):
+        for k in ("run_id", "Run-ID", "RUN_ID", "runId", "runID"):
+            v = obj.get(k)
+            if v:
+                return str(v)
+        for v in obj.values():
+            rid = deep_find_run_id(v)
+            if rid:
+                return rid
+    elif isinstance(obj, list):
+        for it in obj:
+            rid = deep_find_run_id(it)
+            if rid:
+                return rid
+    return None
+
+
 def pick_run_id() -> str:
     # möglichst konsistent: ML > Marts > ADaM > SDTM > Rohdaten
     for phase in [
@@ -91,13 +93,15 @@ def pick_run_id() -> str:
         "Rohdaten",
     ]:
         m = manifests.get(phase, {})
-        rid = m.get("run_id")
+        rid = deep_find_run_id(m)
         if rid:
-            return str(rid)
-        for k in ("ml", "marts", "adam_qc", "sdtm_qc"):
-            rid2 = (m.get(k) or {}).get("run_id")
-            if rid2:
-                return str(rid2)
+            return rid
+    # fallback: notfalls aus irgendeinem manifest_*.json im MANIFEST_DIR ziehen
+    for p in sorted(MANIFEST_DIR.glob("manifest_*.json")):
+        d = load_json(p)
+        rid = deep_find_run_id(d)
+        if rid:
+            return rid
     return "UNBEKANNT"
 
 
@@ -120,10 +124,7 @@ pipeline_status: List[Dict[str, Any]] = []
 for phase in PHASE_ORDER:
     ok = phase in manifests
     pipeline_status.append(
-        {
-            "Phase": phase,
-            "Status": "Erfolgreich" if ok else "Fehlt / nicht ausgeführt",
-        }
+        {"Phase": phase, "Status": "Erfolgreich" if ok else "Fehlt / nicht ausgeführt"}
     )
 
 overall_success = all(p["Status"] == "Erfolgreich" for p in pipeline_status)
@@ -132,17 +133,16 @@ overall_success = all(p["Status"] == "Erfolgreich" for p in pipeline_status)
 # 3) Hilfsfunktionen: Tabellen, Bildpfade, Zahlenformat
 # ------------------------------------------------------------
 
-
 def rel_to_final(path_str: str) -> str:
     """
-    Wir schreiben HTML nach outputs/final/.
-    Bilder liegen meist in outputs/adam_qc oder outputs/ml oder outputs/marts.
-    Im HTML referenzieren wir möglichst relativ vom final/ Ordner aus.
+    HTML wird nach OUT_DIR/final/ geschrieben.
+    Wir referenzieren Artefakte möglichst relativ von final/ aus:
+      - absolute Pfade -> relativ zu OUT_DIR -> ../<rel>
+      - relative Pfade, die unter OUT_DIR existieren -> ../<rel>
     """
     try:
         p = Path(path_str)
 
-        # absolute Pfade: versuchen relativ zu OUT_DIR
         if p.is_absolute():
             try:
                 p = p.relative_to(OUT_DIR)
@@ -150,11 +150,9 @@ def rel_to_final(path_str: str) -> str:
             except Exception:
                 return escape(p.name)
 
-        # relative Pfade: wenn unter OUT_DIR existierend, referenziere als ../<rel>
         if (OUT_DIR / p).exists():
             return escape(str(Path("..") / p))
 
-        # fallback
         return escape(p.as_posix())
     except Exception:
         return escape(path_str)
@@ -219,7 +217,6 @@ def render_charts(charts: List[Dict[str, str]]) -> str:
         )
     return "<div class='grid'>" + "\n".join(blocks) + "</div>"
 
-
 # ------------------------------------------------------------
 # 4) Inhalte pro Phase extrahieren
 # ------------------------------------------------------------
@@ -254,8 +251,8 @@ marts_keycheck = marts_block.get("mart_10_key_check") or {}
 marts_metrics: Dict[str, Any] = {}
 try:
     import duckdb
-
     con2 = duckdb.connect(str(DB_PATH))
+
     exists = con2.execute(
         "SELECT 1 FROM duckdb_tables() WHERE table_name='mart_merged_for_lm' LIMIT 1"
     ).fetchone() is not None
@@ -318,7 +315,8 @@ for nice, key in [
 # ------------------------------------------------------------
 
 final_summary: Dict[str, Any] = {
-    "Run-ID": RUN_ID,
+    "run_id": RUN_ID,  # ✅ zusätzlich maschinenlesbar
+    "Run-ID": RUN_ID,  # ✅ und menschlich (wie vorher)
     "Zeitpunkt (UTC)": RUN_TS.isoformat(),
     "Datenbank": DB_PATH.as_posix(),
     "Pipeline vollständig erfolgreich": overall_success,
@@ -405,7 +403,7 @@ if adam_strict is not None:
     )
 adam_summary_table = html_table(adam_summary_rows, empty_msg="Keine ADaM-QC-Zusammenfassung verfügbar.")
 
-# Marts summary (robust)
+# Marts summary
 marts_summary_rows: List[Dict[str, Any]] = []
 
 uk = marts_keycheck.get("union_keys") if isinstance(marts_keycheck, dict) else None
@@ -415,9 +413,7 @@ if uk is not None:
 if mk is not None:
     marts_summary_rows.append({"Kennzahl": "Anzahl Patienten im Analyse-Datensatz", "Wert": mk})
 if isinstance(uk, (int, float)) and isinstance(mk, (int, float)) and uk:
-    marts_summary_rows.append(
-        {"Kennzahl": "Abdeckung (Analyse vs. Union)", "Wert": f"{round((mk/uk)*100.0, 2)}%"}
-    )
+    marts_summary_rows.append({"Kennzahl": "Abdeckung (Analyse vs. Union)", "Wert": f"{round((mk/uk)*100.0, 2)}%"})
 
 if isinstance(marts_metrics, dict) and marts_metrics:
     for k, v in marts_metrics.items():
@@ -428,38 +424,29 @@ if isinstance(marts_tables, dict) and marts_tables:
 
 marts_summary_table = html_table(marts_summary_rows, empty_msg="Keine Marts-Kennzahlen verfügbar.")
 
-# ML summary (friendly)
+# ML summary
 ml_summary_rows: List[Dict[str, Any]] = []
 if ml_best_model:
     ml_summary_rows.append({"Kennzahl": "Ausgewähltes Modell", "Wert": ml_best_model})
 if ml_best_dataset:
     ml_summary_rows.append({"Kennzahl": "Ausgewähltes Feature-Set", "Wert": ml_best_dataset})
 
-metric_label_map = {
-    "mae": "Mittlerer absoluter Fehler (MAE)",
-    "rmse": "Mittlerer quadratischer Fehler (RMSE)",
-    "r2": "Erklärte Varianz (R²)",
-    "n_test": "Anzahl Testfälle",
-}
+metric_label_map = {"mae": "MAE", "rmse": "RMSE", "r2": "R²", "n_test": "n (Test)"}
 if isinstance(ml_holdout, dict) and ml_holdout:
     for k, v in ml_holdout.items():
         ml_summary_rows.append({"Kennzahl": metric_label_map.get(k, str(k)), "Wert": nice_metric(v)})
 
 ml_summary_table = html_table(ml_summary_rows, empty_msg="Keine ML-Kennzahlen verfügbar.")
 
-# Detail-Links (optional)
+# Detail-Links
 extra_links = []
 adam_html = adam_outputs.get("html_report") if isinstance(adam_outputs, dict) else None
 ml_html = ml_outputs.get("html_report") if isinstance(ml_outputs, dict) else None
 
 if adam_html and file_exists(adam_html):
-    extra_links.append(
-        f"<li>Detailreport ADaM-Qualität: <code>{escape(Path(adam_html).name)}</code></li>"
-    )
+    extra_links.append(f"<li>Detailreport ADaM-Qualität: <code>{escape(Path(adam_html).name)}</code></li>")
 if ml_html and file_exists(ml_html):
-    extra_links.append(
-        f"<li>Detailreport Modelltraining: <code>{escape(Path(ml_html).name)}</code></li>"
-    )
+    extra_links.append(f"<li>Detailreport Modelltraining: <code>{escape(Path(ml_html).name)}</code></li>")
 
 links_html = "<ul>" + "\n".join(extra_links) + "</ul>" if extra_links else "<p><em>(keine Detail-HTMLs gefunden)</em></p>"
 
@@ -495,18 +482,10 @@ html_doc = f"""<!doctype html>
   <div class="card">
     <h3>ADaM-Qualität (Analyse-Datensatz-Standard)</h3>
     {adam_summary_table}
-    <p class="small">
-      <b>Interpretation</b>: Kritische Auffälligkeiten sollten idealerweise bei 0 liegen. Soft-Funde sind Hinweise
-      und sollten dokumentiert werden.
-    </p>
   </div>
   <div class="card">
     <h3>Analyse-Datensatz (Marts)</h3>
     {marts_summary_table}
-    <p class="small">
-      <b>Interpretation</b>: Der finale Analyse-Datensatz sollte pro Patient genau eine Zeile haben; doppelte Patienten
-      sind unerwartet.
-    </p>
   </div>
 </div>
 
@@ -514,12 +493,6 @@ html_doc = f"""<!doctype html>
 <div class="card">
   <h3>Zusammenfassung der Modellleistung (Testdaten)</h3>
   {ml_summary_table}
-  <p class="small">
-    <b>Woran erkennt man ein gutes Modell?</b><br>
-    • Niedriger MAE/RMSE bedeutet geringere Vorhersagefehler.<br>
-    • Ein R² näher an 1 bedeutet, dass das Modell mehr Varianz erklären kann.<br>
-    • Wichtig ist, dass Cross-Validation und Testdaten ähnliche Werte liefern (keine starke Überanpassung).
-  </p>
 </div>
 
 <h2>4) Grafiken</h2>
@@ -530,20 +503,7 @@ html_doc = f"""<!doctype html>
 {render_charts(ml_charts)}
 
 <h2>5) Detail-Reports & Artefakte</h2>
-<p class="small">Optional: Detailseiten aus einzelnen Phasen (falls erzeugt).</p>
 {links_html}
-
-<h2>6) Fazit</h2>
-<div class="card">
-  <p>
-    Die Pipeline wurde {("vollständig erfolgreich" if overall_success else "teilweise")} ausgeführt.
-    Die wichtigsten Ergebnisse sind im Abschnitt <b>„Modelltraining & Modellgüte“</b> zusammengefasst.
-    Die Grafiken unterstützen die Interpretation (Verteilung der Zielgröße, Modellvergleich, Fehlerverhalten).
-  </p>
-  <p class="small">
-    <b>Hinweis</b>: Limitationen werden separat in der Präsentation dokumentiert.
-  </p>
-</div>
 
 </body>
 </html>
@@ -554,14 +514,14 @@ FINAL_HTML.write_text(html_doc, encoding="utf-8")
 # ------------------------------------------------------------
 # 7) Console summary
 # ------------------------------------------------------------
-
 print("\n" + "-" * 70)
 print("FINAL REPORT – SUMMARY")
 print("-" * 70)
-print(f"[out] summary json        : {FINAL_JSON}")
-print(f"[out] final report html   : {FINAL_HTML}")
-print(f"[ok ] overall success     : {overall_success}")
+print(f"[run] run_id               : {RUN_ID}")
+print(f"[out] summary json         : {FINAL_JSON}")
+print(f"[out] final report html    : {FINAL_HTML}")
+print(f"[ok ] overall success      : {overall_success}")
 if missing:
-    print(f"[warn] missing phases     : {', '.join(missing)}")
+    print(f"[warn] missing phases      : {', '.join(missing)}")
 print("=" * 70 + "\n")
 print("STEP 12 DONE")

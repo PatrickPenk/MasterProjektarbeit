@@ -1,6 +1,5 @@
 # ============================================================
 # 05_curated_transform.py
-# Curated Layer (+Quarantine + RI/PK checks + HTML/JSON Report)
 # ============================================================
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from html import escape
 
 import duckdb
 
-from scripts.config import DB_PATH, OUT_DIR, ensure_dirs
+from scripts.config import DB_PATH, MANIFEST_DIR, CURATED_DIR, ensure_dirs
 
 ensure_dirs()
 
@@ -25,11 +24,12 @@ print("=" * 70)
 # ============================================================
 
 manifest_candidates = [
-    OUT_DIR / "manifest_staging_checked.json",
-    OUT_DIR / "manifest_staging.json",
-    OUT_DIR / "manifest_raw_profiled.json",
-    OUT_DIR / "manifest_raw.json",
+    MANIFEST_DIR / "manifest_staging_checked.json",
+    MANIFEST_DIR / "manifest_staging.json",
+    MANIFEST_DIR / "manifest_raw_profiled.json",
+    MANIFEST_DIR / "manifest_raw.json",
 ]
+
 
 manifest_in_path = next((p for p in manifest_candidates if p.exists()), None)
 if manifest_in_path is None:
@@ -55,14 +55,14 @@ print(f"[db ] path                : {DB_PATH}")
 # 2) Output Paths (wie andere Steps: deterministische Namen)
 # ============================================================
 
-CUR_DIR = OUT_DIR / "curated"
+CUR_DIR = CURATED_DIR
 CUR_DIR.mkdir(parents=True, exist_ok=True)
 
 REPORT_HTML_PATH = CUR_DIR / f"dq_curated_report_{RUN_ID}.html"
 RESULTS_JSON_PATH = CUR_DIR / f"dq_curated_results_{RUN_ID}.json"
 
 # Manifest Output (analog Step 03/04)
-MANIFEST_OUT_PATH = OUT_DIR / "manifest_curated.json"
+MANIFEST_OUT_PATH = MANIFEST_DIR / "manifest_curated.json"
 
 # ---------------------------
 # Helpers
@@ -408,7 +408,7 @@ try:
     """)
 
     # ============================================================
-    # 3d) CURATED PROCEDURES (+rejects) – schema-robust
+    # 3d) CURATED PROCEDURES (+rejects)
     # ============================================================
     print("[cur] procedures")
 

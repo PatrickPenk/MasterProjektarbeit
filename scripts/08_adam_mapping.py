@@ -1,24 +1,5 @@
 # ============================================================
 # 08_adam_mapping.py
-# ADaM (minimal, prüfungsorientiert): ADSL + ADBDS_LOS (Index-Visit LOS aus SV)
-#
-# Input:
-#  - SDTM Tabellen in DuckDB (aus Step 06): sdtm_dm, sdtm_sv
-#  - Manifest: outputs/manifest_sdtm_checked.json (fallback: manifest_sdtm.json)
-#
-# Regeln (aus deinem Schritt-18 Konzept, 1:1 umgesetzt):
-#  1) Index-Visit = erster Visit pro Subject (kleinstes SVSTDTC; bei Tie: kleinste VISITNUM)
-#  2) LOS_days:
-#     - wenn SVENDTC vorhanden: diff(end - start) in Tagen (>=0)
-#     - wenn SVENDTC missing: imputiere mit (nächster SVSTDTC) falls vorhanden, sonst -> NA
-#  3) LOS_days wird auf 0 gekappt, falls negative Artefakte
-#  4) ADSL = 1 Zeile pro USUBJID (aus DM), angereichert um Index-Visit Infos + AGE (optional)
-#
-# Output:
-#  - DuckDB Tables: adam_adsl, adam_adbds_los
-#  - CSV: outputs/adam/adsl.csv, outputs/adam/adbds_los.csv
-#  - Manifest: outputs/manifest_adam.json
-#  - Mini HTML Report: outputs/adam/adam_mapping_report.html
 # ============================================================
 
 from __future__ import annotations
@@ -30,7 +11,7 @@ from typing import Dict, Optional, List
 
 import duckdb
 
-from scripts.config import DB_PATH, OUT_DIR, ensure_dirs
+from scripts.config import DB_PATH, MANIFEST_DIR, ADAM_DIR, ensure_dirs
 
 ensure_dirs()
 
@@ -43,8 +24,8 @@ print("=" * 60)
 # ============================================================
 
 manifest_candidates = [
-    OUT_DIR / "manifest_sdtm_checked.json",
-    OUT_DIR / "manifest_sdtm.json",
+    MANIFEST_DIR / "manifest_sdtm_checked.json",
+    MANIFEST_DIR / "manifest_sdtm.json",
 ]
 
 manifest_in_path = next((p for p in manifest_candidates if p.exists()), None)
@@ -71,7 +52,6 @@ print(f"[db ] path                : {DB_PATH}")
 # 2) Output Pfade
 # ============================================================
 
-ADAM_DIR = OUT_DIR / "adam"
 ADAM_DIR.mkdir(parents=True, exist_ok=True)
 
 ADSL_CSV = ADAM_DIR / "adsl.csv"
@@ -79,7 +59,7 @@ ADBDS_LOS_CSV = ADAM_DIR / "adbds_los.csv"
 
 REPORT_HTML = ADAM_DIR / "adam_mapping_report.html"
 RESULTS_JSON = ADAM_DIR / "adam_mapping_results.json"
-MANIFEST_OUT_PATH = OUT_DIR / "manifest_adam.json"
+MANIFEST_OUT_PATH = MANIFEST_DIR / "manifest_adam.json"
 
 STUDYID_DEFAULT = "SYNTH-01"
 STUDYID = (
@@ -143,18 +123,9 @@ try:
         )
 
     # ============================================================
-    # 5) Build LOS view: index visit pro USUBJID (mit End-Imputation)
+    # 5) Build LOS view: index visit pro USUBJID 
     # ============================================================
 
-    # Notes:
-    # - parse SVSTDTC/SVENDTC as TIMESTAMP (try_cast)
-    # - next start per subject: LEAD(start_ts)
-    # - end_imp_ts = COALESCE(end_ts, next_start_ts)
-    # - LOS_days = (end_imp - start) in days, capped at 0, NULL if unresolved
-    # - flags:
-    #   END_IMPUTEDFL = 1 wenn original End fehlt (egal ob später unresolved)
-    #   END_MISSING_UNRESOLVEDFL = 1 wenn End fehlt und auch next start fehlt
-    #
     con.execute("""
     CREATE OR REPLACE TEMP VIEW _sv_los_base AS
     SELECT
@@ -325,7 +296,7 @@ try:
     con.execute(f"COPY adam_adbds_los TO '{ADBDS_LOS_CSV.as_posix()}' (HEADER, DELIMITER ',')")
 
     # ============================================================
-    # 9) Minimalchecks + Metrics
+    # 9) Checks + Metrics
     # ============================================================
 
     adsl_n = scalar_int(con, "SELECT COUNT(*) FROM adam_adsl")

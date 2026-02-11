@@ -1,24 +1,5 @@
 # ============================================================
 # 09_adam_qc.py
-# ADaM QC (minimal, prüfungsorientiert) – ADSL + ADBDS_LOS
-#
-# Ziele:
-#  - 1 Zeile pro USUBJID in ADSL + ADBDS_LOS
-#  - Coverage: LOS vorhanden? End imputiert/unresolved Raten
-#  - Plausibilität: LOS >= 0, Outlier Heuristik, AGE plausibel
-#  - RI: USUBJID in ADSL muss in SDTM DM existieren (und umgekehrt optional)
-#  - Duplicate group heuristics
-#
-# Inputs:
-#  - DuckDB Tabellen aus Step 08: adam_adsl, adam_adbds_los
-#  - SDTM DM aus Step 06: sdtm_dm (für RI)
-#  - Manifest: outputs/manifest_adam.json (fallback: manifest_sdtm_checked.json)
-#
-# Outputs:
-#  - outputs/adam_qc/*.csv
-#  - outputs/adam_qc/adam_qc_report.html
-#  - outputs/adam_qc/chart_*.png
-#  - outputs/manifest_adam_checked.json
 # ============================================================
 
 from __future__ import annotations
@@ -33,7 +14,7 @@ import duckdb
 import pandas as pd
 import matplotlib.pyplot as plt  # matplotlib only
 
-from scripts.config import DB_PATH, OUT_DIR, ensure_dirs
+from scripts.config import DB_PATH, MANIFEST_DIR, ADAM_QC_DIR, ensure_dirs
 
 ensure_dirs()
 
@@ -46,9 +27,9 @@ print("=" * 70)
 # ============================================================
 
 manifest_candidates = [
-    OUT_DIR / "manifest_adam.json",
-    OUT_DIR / "manifest_sdtm_checked.json",
-    OUT_DIR / "manifest_sdtm.json",
+    MANIFEST_DIR / "manifest_adam.json",
+    MANIFEST_DIR / "manifest_sdtm_checked.json",
+    MANIFEST_DIR / "manifest_sdtm.json",
 ]
 
 manifest_in_path = next((p for p in manifest_candidates if p.exists()), None)
@@ -78,7 +59,7 @@ print(f"[qc ] STRICT_QC           : {STRICT_QC}")
 # 2) Output dirs
 # ============================================================
 
-QC_DIR = OUT_DIR / "adam_qc"
+QC_DIR = ADAM_QC_DIR
 QC_DIR.mkdir(parents=True, exist_ok=True)
 
 CSV_COVERAGE = QC_DIR / "adam_qc_coverage.csv"
@@ -88,7 +69,7 @@ CSV_DUPS = QC_DIR / "adam_qc_duplicates.csv"
 
 REPORT_HTML = QC_DIR / "adam_qc_report.html"
 RESULTS_JSON = QC_DIR / "adam_qc_summary.json"
-MANIFEST_OUT = OUT_DIR / "manifest_adam_checked.json"
+MANIFEST_OUT = MANIFEST_DIR / "manifest_adam_checked.json"
 
 CHART_COVERAGE = QC_DIR / "chart_adam_coverage.png"
 CHART_PLAUS_LOS = QC_DIR / "chart_adam_los_plausibility.png"

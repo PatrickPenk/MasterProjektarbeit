@@ -1,18 +1,5 @@
 # ============================================================
 # 11_ml_train.py
-# ML-Training (Notebook-nah: V3 Prep_Pruefung_CDISC.ipynb)
-# Input : DuckDB table mart_merged_for_lm  (aus Step 10)
-# Output: outputs/ml/*  + outputs/manifest_ml.json
-#
-# Notebook-Features (nahe 1:1):
-#  - Dataset overview (rows/cols/cells)
-#  - IQR-Spread-Heatmap (0–1 normalisiert)
-#  - Capping / Winsorizing (Target + ausgewählte Feature-Heuristik)
-#  - Stratified train/test split via pd.qcut(Target, q=10)
-#  - Dataset A vs B (mit und ohne *_count Features)
-#  - y-scaling (MinMax 0..1) + inverse_transform
-#  - Modelvergleich per CV (GradientBoosting vs RandomForest)
-#  - Holdout evaluation + mehrere Plots
 # ============================================================
 
 from __future__ import annotations
@@ -20,12 +7,12 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import duckdb
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt  # matplotlib only
+import matplotlib.pyplot as plt
 
 from sklearn.model_selection import train_test_split, KFold, cross_validate
 from sklearn.compose import ColumnTransformer
@@ -38,9 +25,13 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 import joblib
 
-from scripts.config import DB_PATH, OUT_DIR, ensure_dirs
+from scripts.config import DB_PATH, MANIFEST_DIR, ML_DIR, ensure_dirs
 from html import escape
+
 ensure_dirs()
+# defensive: allow running this step standalone
+MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+ML_DIR.mkdir(parents=True, exist_ok=True)
 
 print("\n" + "=" * 70)
 print("STEP 11 – ML TRAIN (Notebook-nah) on mart_merged_for_lm")
@@ -51,11 +42,11 @@ print("=" * 70)
 # ============================================================
 
 manifest_candidates = [
-    OUT_DIR / "manifest_marts.json",
-    OUT_DIR / "manifest_adam_checked.json",
-    OUT_DIR / "manifest_adam.json",
-    OUT_DIR / "manifest_sdtm_checked.json",
-    OUT_DIR / "manifest_sdtm.json",
+    MANIFEST_DIR / "manifest_marts.json",
+    MANIFEST_DIR / "manifest_adam_checked.json",
+    MANIFEST_DIR / "manifest_adam.json",
+    MANIFEST_DIR / "manifest_sdtm_checked.json",
+    MANIFEST_DIR / "manifest_sdtm.json",
 ]
 
 manifest_in_path = next((p for p in manifest_candidates if p.exists()), None)
@@ -86,9 +77,6 @@ print(f"[db ] path                : {DB_PATH}")
 # 2) Output dirs / files
 # ============================================================
 
-ML_DIR = OUT_DIR / "ml"
-ML_DIR.mkdir(parents=True, exist_ok=True)
-
 CSV_DATASET_OVERVIEW = ML_DIR / "dataset_overview.csv"
 CSV_IQR_SPREAD = ML_DIR / "iqr_spread_numeric.csv"
 CSV_CV_COMPARE = ML_DIR / "model_compare_cv.csv"
@@ -96,9 +84,9 @@ CSV_HOLDOUT_PREDS = ML_DIR / "holdout_predictions.csv"
 
 MODEL_BEST_PKL = ML_DIR / "best_model.pkl"
 JSON_SUMMARY = ML_DIR / "ml_summary.json"
-MANIFEST_OUT = OUT_DIR / "manifest_ml.json"
+MANIFEST_OUT = MANIFEST_DIR / "manifest_ml.json"
 
-# Plots (Notebook-like)
+# Plots
 CHART_TARGET_HIST = ML_DIR / "chart_target_hist.png"
 CHART_IQR_SPREAD = ML_DIR / "chart_iqr_spread_numeric.png"
 CHART_CV_RMSE = ML_DIR / "chart_cv_rmse.png"
@@ -149,6 +137,30 @@ def cap_series(s: pd.Series, lower: Optional[float] = None, upper: Optional[floa
 def infer_count_cols(cols: List[str]) -> List[str]:
     return [c for c in cols if c.lower().endswith("_count") or c.lower().endswith("count")]
 
+def drop_no_observed_numeric_features_by_train(
+    X_train: pd.DataFrame,
+    others: List[pd.DataFrame],
+) -> Tuple[pd.DataFrame, List[pd.DataFrame], List[str]]:
+    """
+    Drop features that have *no observed numeric values* in X_train.
+    This is stronger than isna().all() and matches sklearn's 'no observed values' logic
+    for median imputation (after coercion to numeric).
+    """
+    drop_cols: List[str] = []
+    for c in X_train.columns:
+        # Only check numeric dtype candidates; if object, try numeric coercion anyway
+        s = pd.to_numeric(X_train[c], errors="coerce")
+        if s.notna().sum() == 0:
+            drop_cols.append(c)
+
+    if not drop_cols:
+        return X_train, others, []
+
+    X_train2 = X_train.drop(columns=drop_cols)
+    others2 = [o.drop(columns=drop_cols, errors="ignore") for o in others]
+    return X_train2, others2, drop_cols
+
+
 # ============================================================
 # 4) Load data (merged_for_LM)
 # ============================================================
@@ -168,14 +180,14 @@ if df.empty:
     raise RuntimeError("mart_merged_for_lm ist leer – kein ML möglich.")
 
 # ============================================================
-# 4a) Dataset overview (Notebook-Output-like)
+# 4a) Dataset overview
 # ============================================================
 
 overview = dataset_overview_df(df, "merged_for_LM")
 overview.to_csv(CSV_DATASET_OVERVIEW, index=False)
 
 # ============================================================
-# 4b) (V3 Prep) EDA – Streuung pro numerischer Spalte (IQR, 0–1)
+# 4b) EDA – Streuung pro numerischer Spalte (IQR, 0–1)
 # ============================================================
 
 num_cols_all = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
@@ -219,7 +231,7 @@ if not iqr_df.empty:
     plt.close()
 
 # ============================================================
-# 5) Target / Feature Setup (Notebook: Target = TARGET_LOS_LAST)
+# 5) Target / Feature Setup
 # ============================================================
 
 ID_COL = "USUBJID"
@@ -241,7 +253,7 @@ print(f"[ml ] rows total          : {n_total}")
 print(f"[ml ] target missing      : {n_missing_target} ({safe_pct(n_missing_target, n_total)}%)")
 print(f"[ml ] rows used           : {len(df_model)}")
 
-# Plot target histogram (Notebook-like)
+# Plot target histogram
 plt.figure()
 plt.hist(df_model[TARGET_COL].values, bins=30)
 plt.xlabel(TARGET_COL)
@@ -252,9 +264,7 @@ plt.savefig(CHART_TARGET_HIST, dpi=150)
 plt.close()
 
 # ============================================================
-# 6) Capping (Notebook-typisch)
-#    - Target cap (upper) aus Quantil-Heuristik
-#    - Feature caps: nur für LOS_* numerische Spalten (Heuristik)
+# 6) Capping
 # ============================================================
 
 # Target cap: z.B. 99.5% Quantil
@@ -270,7 +280,6 @@ for c in df_model.columns:
     if c == TARGET_COL or c == ID_COL:
         continue
     if pd.api.types.is_numeric_dtype(df_model[c]):
-        # Notebook-ähnlicher Fokus: LOS_* & zusammengefasste LOS-Features
         if c.upper().startswith("LOS_") or "LOS_" in c.upper() or "LOS" in c.upper():
             capv = df_model[c].quantile(feature_cap_q)
             if pd.notna(capv):
@@ -278,12 +287,11 @@ for c in df_model.columns:
                 df_model[c] = cap_series(df_model[c], lower=None, upper=float(capv))
 
 # ============================================================
-# 7) Build Dataset A/B (Notebook: mit vs ohne count_cols)
+# 7) Build Dataset A/B
 # ============================================================
 
 DROP_ALWAYS = [ID_COL]  # ID raus aus Features
 if "TARGET_LAST_VISIT_CAT" in df_model.columns:
-    # Notebook-typisch: letzter Visit als Target-nah -> nicht als Feature
     DROP_ALWAYS.append("TARGET_LAST_VISIT_CAT")
 
 X_full = df_model.drop(columns=[c for c in DROP_ALWAYS + [TARGET_COL] if c in df_model.columns], errors="ignore")
@@ -292,7 +300,7 @@ keys = df_model[ID_COL].astype(str).values
 
 count_cols = infer_count_cols(list(X_full.columns))
 
-# Dataset A: alle Features (inkl. counts)
+# Dataset A: alle Features
 X_A = X_full.copy()
 
 # Dataset B: drop count_cols
@@ -303,7 +311,7 @@ print(f"[ml ] count cols detected : {len(count_cols)}")
 print(f"[ml ] features B total    : {X_B.shape[1]}")
 
 # ============================================================
-# 8) y scaling (Notebook: MinMax 0..1) + inverse helper
+# 8) y scaling + inverse helper
 # ============================================================
 
 y_scaler = MinMaxScaler()
@@ -316,7 +324,6 @@ def inverse_y(y_scaled_1d: np.ndarray) -> np.ndarray:
 # 9) Stratified train/test split via qcut(Target, q=10)
 # ============================================================
 
-# qcut kann bei zu wenig unique values fail -> fallback ohne stratify
 bins = None
 try:
     bins = pd.qcut(y_raw, q=10, duplicates="drop")
@@ -331,10 +338,18 @@ def split_dataset(X: pd.DataFrame, y_s: np.ndarray, y_r: np.ndarray, keys: np.nd
 XA_tr, XA_te, yA_tr, yA_te, yAraw_tr, yAraw_te, kA_tr, kA_te = split_dataset(X_A, y_scaled, y_raw, keys)
 XB_tr, XB_te, yB_tr, yB_te, yBraw_tr, yBraw_te, kB_tr, kB_te = split_dataset(X_B, y_scaled, y_raw, keys)
 
+#Drop all-NaN features (train-based) to avoid sklearn imputer warnings
+XA_tr, [XA_te], dropped_all_nan_A = drop_no_observed_numeric_features_by_train(XA_tr, [XA_te])
+XB_tr, [XB_te], dropped_all_nan_B = drop_no_observed_numeric_features_by_train(XB_tr, [XB_te])
+
+
+if dropped_all_nan_A:
+    print(f"[ml] dropped all-NaN features in A(train): {dropped_all_nan_A}")
+if dropped_all_nan_B:
+    print(f"[ml] dropped all-NaN features in B(train): {dropped_all_nan_B}")
+
 # ============================================================
 # 10) Preprocessing (Notebook-typisch)
-#     - numeric: median impute + scaler
-#     - categorical: most_frequent + onehot
 # ============================================================
 
 def make_preprocess(X: pd.DataFrame) -> ColumnTransformer:
@@ -372,7 +387,6 @@ scoring = {
     "r2": "r2",
 }
 
-# Notebook-nahe Default-Modelle
 gb = GradientBoostingRegressor(
     random_state=42,
     n_estimators=400,
@@ -387,7 +401,7 @@ rf = RandomForestRegressor(
     min_samples_leaf=2,
 )
 
-def cv_compare(name_prefix: str, Xtr: pd.DataFrame, ytr: np.ndarray) -> List[Dict]:
+def cv_compare(name_prefix: str, Xtr: pd.DataFrame, ytr: np.ndarray, dropped_cols: List[str]) -> List[Dict]:
     pre = make_preprocess(Xtr)
     rows: List[Dict] = []
     for model_name, est in [("GradientBoosting", gb), ("RandomForest", rf)]:
@@ -402,17 +416,22 @@ def cv_compare(name_prefix: str, Xtr: pd.DataFrame, ytr: np.ndarray) -> List[Dic
             "cv_r2": float(np.mean(res["test_r2"])),
             "n_train": int(len(Xtr)),
             "n_features_raw": int(Xtr.shape[1]),
+            "dropped_all_nan_features_n": int(len(dropped_cols)),
         })
     return rows
 
 rows_cv: List[Dict] = []
-rows_cv += cv_compare("A_with_counts", XA_tr, yA_tr)
-rows_cv += cv_compare("B_without_counts", XB_tr, yB_tr)
+rows_cv += cv_compare("A_with_counts", XA_tr, yA_tr, dropped_all_nan_A)
+rows_cv += cv_compare("B_without_counts", XB_tr, yB_tr, dropped_all_nan_B)
 
-cv_df = pd.DataFrame(rows_cv).sort_values(["dataset", "cv_rmse", "cv_mae"], ascending=[True, True, True]).reset_index(drop=True)
+cv_df = (
+    pd.DataFrame(rows_cv)
+    .sort_values(["dataset", "cv_rmse", "cv_mae"], ascending=[True, True, True])
+    .reset_index(drop=True)
+)
 cv_df.to_csv(CSV_CV_COMPARE, index=False)
 
-# CV RMSE chart (Notebook-like)
+# CV RMSE chart
 plt.figure()
 labels = (cv_df["dataset"] + ":" + cv_df["model"]).tolist()
 plt.bar(labels, cv_df["cv_rmse"].values)
@@ -433,10 +452,10 @@ print(f"[ml ] best dataset/model  : {best_dataset} / {best_model_name}")
 # Build best pipeline and evaluate on corresponding holdout
 def get_split_for_best():
     if best_dataset == "A_with_counts":
-        return (XA_tr, XA_te, yA_tr, yA_te, yAraw_te, kA_te)
-    return (XB_tr, XB_te, yB_tr, yB_te, yBraw_te, kB_te)
+        return (XA_tr, XA_te, yA_tr, yA_te, yAraw_te, kA_te, dropped_all_nan_A)
+    return (XB_tr, XB_te, yB_tr, yB_te, yBraw_te, kB_te, dropped_all_nan_B)
 
-Xtr, Xte, ytr, yte, yraw_te, kte = get_split_for_best()
+Xtr, Xte, ytr, yte, yraw_te, kte, dropped_best = get_split_for_best()
 
 pre_best = make_preprocess(Xtr)
 est_best = gb if best_model_name == "GradientBoosting" else rf
@@ -446,7 +465,7 @@ best_pipe.fit(Xtr, ytr)
 y_pred_scaled = best_pipe.predict(Xte)
 y_pred_raw = inverse_y(np.asarray(y_pred_scaled))
 
-# Metrics on RAW scale (Notebook: inverse transform)
+# Metrics on RAW scale
 holdout_mae = float(mean_absolute_error(yraw_te, y_pred_raw))
 holdout_rmse = float(rmse(yraw_te, y_pred_raw))
 holdout_r2 = float(r2_score(yraw_te, y_pred_raw))
@@ -462,7 +481,7 @@ pred_df = pd.DataFrame({
 pred_df.to_csv(CSV_HOLDOUT_PREDS, index=False)
 
 # ============================================================
-# 12) Plots (Notebook-like diagnostics)
+# 12) Plots
 # ============================================================
 
 # Pred vs True
@@ -496,9 +515,6 @@ plt.tight_layout()
 plt.savefig(CHART_RESID_HIST, dpi=150)
 plt.close()
 
-
-
-
 REPORT_HTML = ML_DIR / "ml_report.html"
 
 def html_table(df: pd.DataFrame, max_rows: int = 50) -> str:
@@ -527,7 +543,6 @@ css = """
 </style>
 """
 
-# kleine Holdout-Zusammenfassung als DF
 holdout_summary_df = pd.DataFrame([{
     "best_dataset": best_dataset,
     "best_model": best_model_name,
@@ -535,10 +550,18 @@ holdout_summary_df = pd.DataFrame([{
     "holdout_rmse_raw": holdout_rmse,
     "holdout_r2_raw": holdout_r2,
     "n_test": int(len(pred_df)),
+    "dropped_all_nan_features_best_n": int(len(dropped_best)),
 }])
 
-# iqr_df kann riesig sein -> im Report nur Top 80 anzeigen
 IQR_TOP_N = 80
+
+dropped_df = pd.DataFrame([{
+    "dataset": "A_with_counts",
+    "dropped_all_nan_features": ", ".join(dropped_all_nan_A) if dropped_all_nan_A else "",
+}, {
+    "dataset": "B_without_counts",
+    "dropped_all_nan_features": ", ".join(dropped_all_nan_B) if dropped_all_nan_B else "",
+}])
 
 html_doc = f"""<!doctype html>
 <html>
@@ -571,6 +594,10 @@ html_doc = f"""<!doctype html>
 
   <h2>Cross Validation Vergleich</h2>
   {html_table(cv_df, max_rows=20)}
+
+  <h2>All-NaN Feature Drop (Train-based QC)</h2>
+  <p><em>Features, die im Trainingssplit komplett fehlen, werden vor der Imputation entfernt.</em></p>
+  {html_table(dropped_df, max_rows=10)}
 
   <h2>IQR Streuung (Top {IQR_TOP_N})</h2>
   {html_table(iqr_df.head(IQR_TOP_N), max_rows=IQR_TOP_N)}
@@ -620,7 +647,6 @@ html_doc = f"""<!doctype html>
 REPORT_HTML.write_text(html_doc, encoding="utf-8")
 print(f"[out] html report          : {REPORT_HTML}")
 
-
 # ============================================================
 # 13) Persist model + summaries
 # ============================================================
@@ -641,9 +667,15 @@ summary = {
     "rows_total": int(n_total),
     "rows_used": int(len(df_model)),
     "target_missing_rows": int(n_missing_target),
-    "dataset_A_features": int(X_A.shape[1]),
-    "dataset_B_features": int(X_B.shape[1]),
+    "dataset_A_features_raw": int(X_A.shape[1]),
+    "dataset_B_features_raw": int(X_B.shape[1]),
     "count_cols_detected": int(len(count_cols)),
+    "dropped_all_nan_features": {
+        "A_with_counts": dropped_all_nan_A,
+        "B_without_counts": dropped_all_nan_B,
+        "best_dataset": best_dataset,
+        "best_dataset_dropped": dropped_best,
+    },
     "best_choice": {
         "dataset": best_dataset,
         "model": best_model_name,
@@ -671,6 +703,7 @@ summary = {
             "residuals": CHART_RESIDUALS.as_posix(),
             "residual_hist": CHART_RESID_HIST.as_posix(),
         },
+        "html_report": REPORT_HTML.as_posix(),
     },
 }
 
@@ -685,12 +718,13 @@ manifest_out["ml"] = {
     "best_dataset": best_dataset,
     "best_model": best_model_name,
     "holdout_metrics_raw": summary["holdout_metrics_raw"],
+    "dropped_all_nan_features": summary["dropped_all_nan_features"],
     "outputs": summary["outputs"],
     "source_manifest": manifest_in_path.name,
-    "html_report": REPORT_HTML.as_posix(),
     "notes": [
         "Notebook-nah: A/B (counts vs no-counts), qcut-stratify split, y MinMax scaling + inverse.",
         "Modelvergleich: GradientBoosting vs RandomForest per CV auf scaled target.",
+        "Train-based Feature QC: Drop all-NaN columns before median imputation.",
         "Plots + CSV Artefakte wie Notebook-Outputs.",
     ],
 }
@@ -708,6 +742,7 @@ print(f"[out] iqr spread          : {CSV_IQR_SPREAD}")
 print(f"[out] cv compare          : {CSV_CV_COMPARE}")
 print(f"[out] holdout preds       : {CSV_HOLDOUT_PREDS}")
 print(f"[out] best model          : {MODEL_BEST_PKL}")
+print(f"[out] html report         : {REPORT_HTML}")
 print(f"[out] charts              :")  # noqa: F541
 print(f"      - {CHART_TARGET_HIST.name}")
 print(f"      - {CHART_IQR_SPREAD.name}")
@@ -718,9 +753,10 @@ print(f"      - {CHART_RESID_HIST.name}")
 print(f"[out] summary json         : {JSON_SUMMARY}")
 print(f"[out] manifest            : {MANIFEST_OUT}")
 print(f"[ml ] best               : {best_dataset} / {best_model_name}")
+print(f"[ml ] dropped all-NaN A  : {len(dropped_all_nan_A)}")
+print(f"[ml ] dropped all-NaN B  : {len(dropped_all_nan_B)}")
 print(f"[ml ] holdout MAE (raw)  : {holdout_mae:.4f}")
 print(f"[ml ] holdout RMSE (raw) : {holdout_rmse:.4f}")
 print(f"[ml ] holdout R2 (raw)   : {holdout_r2:.4f}")
 print("=" * 70 + "\n")
 print("STEP 11 DONE")
-

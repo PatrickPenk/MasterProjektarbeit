@@ -15,3 +15,15 @@ venv/
 # OS / Editor
 .DS_Store
 .vscode/
+
+# Markdown / Preview artifacts
+README.html
+README_files/
+*.html
+
+# VS Code Markdown Preview / Cache
+.markdown-preview/
+.vscode/
+
+# General caches
+.cache/

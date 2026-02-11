@@ -3,9 +3,9 @@ pandas>=2.0
 numpy>=1.24
 
 # Database / SQL
-duckdb>=0.9
+duckdb>=0.10.0
 
-# File formats
+# File formats / Interchange
 pyarrow>=12.0
 
 # Machine Learning
