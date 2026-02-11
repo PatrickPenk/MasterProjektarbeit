@@ -266,14 +266,13 @@ plt.close()
 # ============================================================
 # 6) Capping
 # ============================================================
-
 # Target cap: z.B. 99.5% Quantil
-target_cap_q = 0.995
+target_cap_q = 0.99
 target_upper = float(df_model[TARGET_COL].quantile(target_cap_q))
 df_model[TARGET_COL] = cap_series(df_model[TARGET_COL], lower=0.0, upper=target_upper)
 
-# Feature caps (Heuristik: LOS_* und *MEAN*/*MAX*): cap bei 99.5%
-feature_cap_q = 0.995
+# Feature caps (Heuristik: LOS_* und *MEAN*/*MAX*): cap bei 99%
+feature_cap_q = 0.99
 feature_caps: Dict[str, float] = {}
 
 for c in df_model.columns:
