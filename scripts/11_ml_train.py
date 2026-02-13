@@ -9,9 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import duckdb
 import numpy as np
 import pandas as pd
+
+import duckdb
 import matplotlib.pyplot as plt
 
 from sklearn.model_selection import train_test_split, KFold, cross_validate
@@ -329,10 +330,39 @@ try:
 except Exception:
     bins = None
 
-def split_dataset(X: pd.DataFrame, y_s: np.ndarray, y_r: np.ndarray, keys: np.ndarray):
+
+
+def split_dataset(X: pd.DataFrame, y_s, y_r, keys):
+    # Ensure X is a real pandas DataFrame (not arrow array)
+    if not isinstance(X, pd.DataFrame):
+        X = pd.DataFrame(X)
+
+    # Force y/keys to numpy (safe for sklearn)
+    y_s_np = y_s.to_numpy() if hasattr(y_s, "to_numpy") else np.asarray(y_s)
+    y_r_np = y_r.to_numpy() if hasattr(y_r, "to_numpy") else np.asarray(y_r)
+    keys_np = keys.to_numpy(dtype=object) if hasattr(keys, "to_numpy") else np.asarray(keys, dtype=object)
+
+    # Build a numeric row-index array for splitting (this avoids Arrow slicing issues)
+    idx = np.arange(len(X))
+
     if bins is not None:
-        return train_test_split(X, y_s, y_r, keys, test_size=0.2, random_state=42, stratify=bins)
-    return train_test_split(X, y_s, y_r, keys, test_size=0.2, random_state=42)
+        bins_np = bins.to_numpy() if hasattr(bins, "to_numpy") else np.asarray(bins)
+        idx_tr, idx_te, y_s_tr, y_s_te, y_r_tr, y_r_te, k_tr, k_te = train_test_split(
+            idx, y_s_np, y_r_np, keys_np,
+            test_size=0.2, random_state=42, stratify=bins_np
+        )
+    else:
+        idx_tr, idx_te, y_s_tr, y_s_te, y_r_tr, y_r_te, k_tr, k_te = train_test_split(
+            idx, y_s_np, y_r_np, keys_np,
+            test_size=0.2, random_state=42
+        )
+
+    # Return X as DataFrames using iloc (keeps columns!)
+    X_tr = X.iloc[idx_tr].copy()
+    X_te = X.iloc[idx_te].copy()
+
+    return X_tr, X_te, y_s_tr, y_s_te, y_r_tr, y_r_te, k_tr, k_te
+
 
 XA_tr, XA_te, yA_tr, yA_te, yAraw_tr, yAraw_te, kA_tr, kA_te = split_dataset(X_A, y_scaled, y_raw, keys)
 XB_tr, XB_te, yB_tr, yB_te, yBraw_tr, yBraw_te, kB_tr, kB_te = split_dataset(X_B, y_scaled, y_raw, keys)
